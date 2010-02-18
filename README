@@ -1,0 +1,3 @@
+gpsvideo
+--------
+Testing code for capturing video frames using gstreamer, adding geo metadata and compressing to jpeg files. 
