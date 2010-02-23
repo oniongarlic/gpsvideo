@@ -1,3 +1,4 @@
+#include "config.h"
 
 #include <string.h>
 #include <math.h>
@@ -14,7 +15,7 @@ GstElement *sink;
 
 GMainLoop *loop;
 
-gboolean
+static gboolean
 set_tag(GstElement *gstjpegenc, gpointer data)
 {
 GstTagSetter *e=GST_TAG_SETTER(data);
@@ -27,7 +28,7 @@ lon=g_random_double_range(-180,180);
 
 g_debug("Geo: %f, %f", lat, lon);
 
-#if 0
+#if 1
 gst_tag_setter_reset_tags(e);
 gst_tag_setter_add_tags(e,
 	GST_TAG_MERGE_REPLACE, 
@@ -42,6 +43,8 @@ tl=gst_tag_list_new_full(GST_TAG_GEO_LOCATION_LATITUDE, lat,
 te=gst_event_new_tag(tl);
 gst_element_send_event(imageenc, te);
 #endif
+
+gst_element_send_event(pipe, gst_event_new_new_segment(FALSE, 1.0, GST_FORMAT_BYTES, 0, -1, 0));
 
 return TRUE;
 }
@@ -69,13 +72,14 @@ g_assert(gst_element_link(metadata, sink));
 
 g_object_set(imageenc, "quality", 65, NULL);
 g_object_set(sink, "location", "out/gps-%05d.jpg", NULL);
+g_object_set(sink, "post-messages", TRUE, NULL);
 
 g_signal_connect(imageenc, "frame-encoded", set_tag, metadata);
 
 gst_element_set_state(pipe, GST_STATE_PLAYING);
 
 loop=g_main_loop_new(NULL, TRUE);
-g_timeout_add(2000, g_main_loop_quit, loop);
+g_timeout_add(5000, g_main_loop_quit, loop);
 
 g_main_loop_run(loop);
 
