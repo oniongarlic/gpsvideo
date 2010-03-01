@@ -15,6 +15,9 @@ GstElement *sink;
 
 GMainLoop *loop;
 
+#define USE_TAG_SETTER 1
+#define USE_METADATAMUX 0
+
 static gboolean
 set_tag(GstElement *gstjpegenc, gpointer data)
 {
@@ -22,23 +25,29 @@ GstTagSetter *e=GST_TAG_SETTER(data);
 GstTagList *tl;
 GstEvent *te;
 gdouble lat, lon;
+gchar *cmt;
 
 lat=g_random_double_range(-90,90);
 lon=g_random_double_range(-180,180);
 
 g_debug("Geo: %f, %f", lat, lon);
 
-#if 1
+cmt=g_strdup_printf("Geo: %f, %f", lat, lon);
+
+#ifdef USE_TAG_SETTER
 gst_tag_setter_reset_tags(e);
 gst_tag_setter_add_tags(e,
 	GST_TAG_MERGE_REPLACE, 
+	GST_TAG_COMMENT, cmt, 
 	GST_TAG_GEO_LOCATION_LATITUDE, lat,
 	GST_TAG_GEO_LOCATION_LONGITUDE, lon, 
 	GST_TAG_GEO_LOCATION_NAME, "Testing", NULL);
 #else
 tl=gst_tag_list_new_full(GST_TAG_GEO_LOCATION_LATITUDE, lat,
 	GST_TAG_GEO_LOCATION_LONGITUDE, lon, 
-	GST_TAG_GEO_LOCATION_NAME, "Testing", NULL);
+	GST_TAG_GEO_LOCATION_NAME, "Testing",
+	GST_TAG_COMMENT, cmt, 
+	NULL);
 
 te=gst_event_new_tag(tl);
 gst_element_send_event(imageenc, te);
@@ -59,7 +68,13 @@ pipe=gst_pipeline_new("pipeline");
 src=gst_element_factory_make("v4l2src", "video");
 queue=gst_element_factory_make("queue", "queue");
 imageenc=gst_element_factory_make("jpegenc", "jpeg");
+
+#ifdef USE_METADATAMUX
 metadata=gst_element_factory_make("metadatamux", "meta");
+#else
+metadata=gst_element_factory_make("jifmux", "meta");
+#endif
+
 queue=gst_element_factory_make("queue", "queue");
 sink=gst_element_factory_make("multifilesink", "sink");
 
