@@ -6,12 +6,28 @@
 #include <glib/gstdio.h>
 #include <gst/gst.h>
 
-GstElement *pipe;
-GstElement *src;
-GstElement *queue;
-GstElement *imageenc;
-GstElement *metadata;
-GstElement *sink;
+typedef struct _VideoSrc VideoSrc;
+struct _VideoSrc {
+	GstElement *pipe;
+	GstElement *src;
+	GstElement *queue;
+	GstElement *tee;
+	GstElement *xv;
+	GstElement *sink;
+}
+
+typedef struct _GeoImageSink GeoImageSink;
+struct _GeoImageSink {
+	GstElement *pipe;
+	GstElement *src;
+	GstElement *queue;
+	GstElement *imageenc;
+	GstElement *metadata;
+	GstElement *sink;
+};
+
+VideoSrc vsrc;
+GeoImageSink gsink;
 
 GMainLoop *loop;
 
@@ -58,40 +74,58 @@ gst_element_send_event(pipe, gst_event_new_new_segment(FALSE, 1.0, GST_FORMAT_BY
 return TRUE;
 }
 
+void videosrc()
+{
+vsrc.pipe=gst_pipeline_new("pipeline");
+vsrc.src=gst_element_factory_make("v4l2src", "video");
+vsrc.queue=gst_element_factory_make("queue", "queue");
+vsrc.tee=gst_element_factory_make("tee", "tee");
+vsrc.xv=gst_element_factory_make("xvimagesink", "xv");
+vsrc.sink=gst_element_factory_make("fakesink", "fakesink");
+
+gst_bin_add_many(GST_BIN(pipe), src, queue, imageenc, metadata, sink, NULL);
+
+g_assert(gst_element_link(vsrc.src, vsrc.queue));
+g_assert(gst_element_link(vsrc.queue, vsrc.tee));
+g_assert(gst_element_link(vsrc.tee, vsrc.sink));
+}
+
+void imagesink()
+{
+gsink.pipe=gst_pipeline_new("pipeline");
+gsink.imageenc=gst_element_factory_make("jpegenc", "jpeg");
+
+#ifdef USE_METADATAMUX
+gsink.metadata=gst_element_factory_make("metadatamux", "meta");
+#else
+gsink.metadata=gst_element_factory_make("jifmux", "meta");
+#endif
+
+gsink.queue=gst_element_factory_make("queue", "queue");
+gsink.sink=gst_element_factory_make("filesink", "sink");
+
+gst_bin_add_many(GST_BIN(pipe), src, queue, imageenc, metadata, sink, NULL);
+
+g_assert(gst_element_link(gsink.src, gsink.queue));
+g_assert(gst_element_link(gsink.queue, gsink.imageenc));
+g_assert(gst_element_link(gsink.imageenc, gsink.metadata));
+g_assert(gst_element_link(gsink.metadata, gsink.sink));
+
+g_object_set(gsink.imageenc, "quality", 65, NULL);
+g_object_set(gsink.sink, "location", "gps.jpg", NULL);
+g_signal_connect(imageenc, "frame-encoded", set_tag, gsink.metadata);
+}
+
 gint
 main(gint argc, gchar **argv)
 {
 g_type_init();
 gst_init(&argc, &argv);
 
-pipe=gst_pipeline_new("pipeline");
-src=gst_element_factory_make("v4l2src", "video");
-queue=gst_element_factory_make("queue", "queue");
-imageenc=gst_element_factory_make("jpegenc", "jpeg");
+videosrc();
+imagesink();
 
-#ifdef USE_METADATAMUX
-metadata=gst_element_factory_make("metadatamux", "meta");
-#else
-metadata=gst_element_factory_make("jifmux", "meta");
-#endif
-
-queue=gst_element_factory_make("queue", "queue");
-sink=gst_element_factory_make("multifilesink", "sink");
-
-gst_bin_add_many(GST_BIN(pipe), src, queue, imageenc, metadata, sink, NULL);
-
-g_assert(gst_element_link(src, queue));
-g_assert(gst_element_link(queue, imageenc));
-g_assert(gst_element_link(imageenc, metadata));
-g_assert(gst_element_link(metadata, sink));
-
-g_object_set(imageenc, "quality", 65, NULL);
-g_object_set(sink, "location", "out/gps-%05d.jpg", NULL);
-g_object_set(sink, "post-messages", TRUE, NULL);
-
-g_signal_connect(imageenc, "frame-encoded", set_tag, metadata);
-
-gst_element_set_state(pipe, GST_STATE_PLAYING);
+gst_element_set_state(vsrc.pipe, GST_STATE_PLAYING);
 
 loop=g_main_loop_new(NULL, TRUE);
 g_timeout_add(5000, g_main_loop_quit, loop);
