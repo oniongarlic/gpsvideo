@@ -19,6 +19,8 @@ struct _GeoImagePipe {
 	GstElement *tee_queue_2;
 	GstElement *videorate;
 	GstElement *filesink;
+
+	GstElement *textoverlay;
 	GstElement *videosink;
 };
 
@@ -41,6 +43,8 @@ lon=g_random_double_range(-180,180);
 g_debug("Geo: %f, %f\n", lat, lon);
 
 cmt=g_strdup_printf("Geo: %f, %f", lat, lon);
+
+g_object_set(gis.textoverlay, "text", cmt, NULL);
 
 gst_tag_setter_reset_tags(e);
 gst_tag_setter_add_tags(e,
@@ -82,17 +86,33 @@ gst_caps_unref(cr);
 gis.imageenc=gst_element_factory_make("jpegenc", "jpeg");
 gis.metadata=gst_element_factory_make("jifmux", "meta");
 
+// Tee
+gis.tee=gst_element_factory_make("tee", "tee");
+gis.tee_queue_1=gst_element_factory_make("queue", "queue1");
+gis.tee_queue_2=gst_element_factory_make("queue", "queue2");
+
+// Overlay
+gis.textoverlay=gst_element_factory_make("textoverlay", "textoverlay");
+
 // Sink(s)
 gis.filesink=gst_element_factory_make("multifilesink", "filesink");
 gis.videosink=gst_element_factory_make("autovideosink", "videosink");
 
-gst_bin_add_many(GST_BIN(gis.pipe), gis.src, gis.queue, gis.videorate, gis.capsfilter, gis.imageenc, gis.metadata, gis.filesink, NULL);
-gst_element_link_many(gis.src, gis.queue, gis.videorate, gis.capsfilter, gis.imageenc, gis.metadata, gis.filesink, NULL);
+gst_bin_add_many(GST_BIN(gis.pipe), gis.src, gis.queue,
+	gis.videorate, gis.capsfilter,
+	gis.tee, gis.imageenc, gis.metadata,
+	gis.tee_queue_1, gis.tee_queue_2, gis.filesink, gis.textoverlay, gis.videosink, NULL);
+
+gst_element_link_many(gis.src, gis.queue, gis.videorate, gis.capsfilter, gis.tee, NULL);
+gst_element_link_many(gis.tee, gis.tee_queue_1, gis.imageenc, gis.metadata, gis.filesink, NULL);
+gst_element_link_many(gis.tee, gis.tee_queue_2, gis.textoverlay, gis.videosink, NULL);
 
 // Setup
 //g_object_set(gis.src, "num-buffers", 25, NULL);
 g_object_set(gis.imageenc, "quality", 65, NULL);
 g_object_set(gis.filesink, "location", "gps_%d.jpg", NULL);
+
+g_object_set(gis.textoverlay, "text", "Starting up...", NULL);
 
 set_tag(gis.metadata, &gis);
 }
