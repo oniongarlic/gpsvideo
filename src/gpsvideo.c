@@ -6,6 +6,8 @@
 #include <glib/gstdio.h>
 #include <gst/gst.h>
 
+#include <geoclue/geoclue-position.h>
+
 typedef struct _GeoImagePipe GeoImagePipe;
 struct _GeoImagePipe {
 	GstElement *pipe;
@@ -26,6 +28,18 @@ struct _GeoImagePipe {
 
 GeoImagePipe gis;
 GMainLoop *loop;
+
+static void
+geo_position_changed (GeocluePosition *position, GeocluePositionFields fields, int timestamp,
+	double latitude, double longitude, double altitude, GeoclueAccuracy *accuracy, gpointer userdata)
+{
+g_print ("Position changed:\n");
+if (fields & GEOCLUE_POSITION_FIELDS_LATITUDE && fields & GEOCLUE_POSITION_FIELDS_LONGITUDE) {
+	g_print ("\t%f, %f\n\n", latitude, longitude);
+} else {
+	g_print ("No valid position\n");
+}
+}
 
 static gboolean
 set_tag(GstElement *gstjpegenc, gpointer data)
@@ -164,6 +178,7 @@ return FALSE;
 gint
 main(gint argc, gchar **argv)
 {
+GeocluePosition *pos;
 GstBus *bus;
 int bus_watch_id;
 
@@ -179,6 +194,10 @@ gst_object_unref(bus);
 g_timeout_add(500, generate_geotag, NULL);
 
 g_unix_signal_add(SIGINT, on_sigint, &gis.pipe);
+
+pos=geoclue_position_new("org.freedesktop.Geoclue.Providers.Gypsy", "/org/freedesktop/Geoclue/Providers/Gypsy");
+
+g_signal_connect(G_OBJECT (pos), "position-changed",G_CALLBACK (geo_position_changed), NULL);
 
 gst_element_set_state(gis.pipe, GST_STATE_PLAYING);
 
