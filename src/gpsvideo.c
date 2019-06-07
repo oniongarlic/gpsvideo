@@ -11,9 +11,15 @@ struct _GeoImagePipe {
 	GstElement *pipe;
 	GstElement *src;
 	GstElement *queue;
+	GstElement *capsfilter;
 	GstElement *imageenc;
 	GstElement *metadata;
-	GstElement *sink;
+	GstElement *tee;
+	GstElement *tee_queue_1;
+	GstElement *tee_queue_2;
+	GstElement *videorate;
+	GstElement *filesink;
+	GstElement *videosink;
 };
 
 GeoImagePipe gis;
@@ -59,18 +65,34 @@ geoimagepipe()
 {
 gis.pipe=gst_pipeline_new("pipeline");
 
+// Source
 gis.src=gst_element_factory_make("v4l2src", "video");
 gis.queue=gst_element_factory_make("queue", "queue");
+
+// Filtering/Caps
+gis.videorate=gst_element_factory_make("videorate", "videorate");
+gis.capsfilter=gst_element_factory_make("capsfilter", "capsfilter");
+
+// Framerate, 1 FPS
+GstCaps *cr=gst_caps_from_string ("video/x-raw,framerate=1/1");
+g_object_set(gis.capsfilter, "caps", cr, NULL);
+gst_caps_unref(cr);
+
+// Encoding
 gis.imageenc=gst_element_factory_make("jpegenc", "jpeg");
 gis.metadata=gst_element_factory_make("jifmux", "meta");
-gis.sink=gst_element_factory_make("multifilesink", "sink");
 
-gst_bin_add_many(GST_BIN(gis.pipe), gis.src, gis.queue, gis.imageenc, gis.metadata, gis.sink, NULL);
-gst_element_link_many(gis.src, gis.queue, gis.imageenc, gis.metadata, gis.sink, NULL);
+// Sink(s)
+gis.filesink=gst_element_factory_make("multifilesink", "filesink");
+gis.videosink=gst_element_factory_make("autovideosink", "videosink");
 
-g_object_set(gis.src, "num-buffers", 25, NULL);
+gst_bin_add_many(GST_BIN(gis.pipe), gis.src, gis.queue, gis.videorate, gis.capsfilter, gis.imageenc, gis.metadata, gis.filesink, NULL);
+gst_element_link_many(gis.src, gis.queue, gis.videorate, gis.capsfilter, gis.imageenc, gis.metadata, gis.filesink, NULL);
+
+// Setup
+//g_object_set(gis.src, "num-buffers", 25, NULL);
 g_object_set(gis.imageenc, "quality", 65, NULL);
-g_object_set(gis.sink, "location", "gps_%d.jpg", NULL);
+g_object_set(gis.filesink, "location", "gps_%d.jpg", NULL);
 
 set_tag(gis.metadata, &gis);
 }
@@ -90,14 +112,33 @@ switch (GST_MESSAGE_TYPE (msg)) {
 		gst_message_parse_error (msg, &error, &debug);
 		g_free (debug);
 
-		g_printerr ("Error: %s\n", error->message);
-		g_error_free (error);
-		g_main_loop_quit (loop);
+		g_printerr("Error: %s\n", error->message);
+		g_error_free(error);
+		g_main_loop_quit(loop);
 	}
+	break;
+	default:
+		g_print("Unhandled message %d\n", GST_MESSAGE_TYPE (msg));
 	break;
 }
 
 return TRUE;
+}
+
+gboolean on_sigint(gpointer data)
+{
+
+g_return_val_if_fail(data, FALSE);
+
+g_print ("SIGINT\n");
+
+GeoImagePipe *g=(GeoImagePipe *)data;
+
+gst_element_send_event(g->pipe, gst_event_new_eos());
+
+g_main_loop_quit(loop);
+
+return FALSE;
 }
 
 gint
@@ -115,16 +156,18 @@ bus = gst_pipeline_get_bus(GST_PIPELINE(gis.pipe));
 bus_watch_id = gst_bus_add_watch(bus, bus_call, loop);
 gst_object_unref(bus);
 
-g_timeout_add(100, generate_geotag, NULL);
+g_timeout_add(500, generate_geotag, NULL);
+
+g_unix_signal_add(SIGINT, on_sigint, &gis.pipe);
 
 gst_element_set_state(gis.pipe, GST_STATE_PLAYING);
 
 loop=g_main_loop_new(NULL, TRUE);
-g_timeout_add(5000, g_main_loop_quit, loop);
+//g_timeout_add(5000, g_main_loop_quit, loop);
 
 g_main_loop_run(loop);
-
 g_main_loop_unref(loop);
+
 gst_object_unref(bus);
 gst_element_set_state(gis.pipe, GST_STATE_NULL);
 gst_object_unref(gis.pipe);
